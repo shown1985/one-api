@@ -63,18 +63,24 @@ var ModelRatio = map[string]float64{
 	"text-search-ada-doc-001": 10,
 	"text-moderation-stable":  0.1,
 	"text-moderation-latest":  0.1,
-	"dall-e-2":                8,     // $0.016 - $0.020 / image
-	"dall-e-3":                20,    // $0.040 - $0.120 / image
-	"claude-instant-1":        0.815, // $1.63 / 1M tokens
-	"claude-2":                5.51,  // $11.02 / 1M tokens
-	"claude-2.0":              5.51,  // $11.02 / 1M tokens
-	"claude-2.1":              5.51,  // $11.02 / 1M tokens
+	"dall-e-2":                8,  // $0.016 - $0.020 / image
+	"dall-e-3":                20, // $0.040 - $0.120 / image
+	// https://www.anthropic.com/api#pricing
+	"claude-instant-1.2":       0.8 / 1000 * USD,
+	"claude-2.0":               8.0 / 1000 * USD,
+	"claude-2.1":               8.0 / 1000 * USD,
+	"claude-3-haiku-20240307":  0.25 / 1000 * USD,
+	"claude-3-sonnet-20240229": 3.0 / 1000 * USD,
+	"claude-3-opus-20240229":   15.0 / 1000 * USD,
 	// https://cloud.baidu.com/doc/WENXINWORKSHOP/s/hlrk4akp7
 	"ERNIE-Bot":         0.8572,     // ￥0.012 / 1k tokens
 	"ERNIE-Bot-turbo":   0.5715,     // ￥0.008 / 1k tokens
 	"ERNIE-Bot-4":       0.12 * RMB, // ￥0.12 / 1k tokens
 	"ERNIE-Bot-8k":      0.024 * RMB,
 	"Embedding-V1":      0.1429, // ￥0.002 / 1k tokens
+	"bge-large-zh":      0.002 * RMB,
+	"bge-large-en":      0.002 * RMB,
+	"bge-large-8k":      0.002 * RMB,
 	"PaLM-2":            1,
 	"gemini-pro":        1, // $0.00025 / 1k characters -> $0.001 / 1k tokens
 	"gemini-pro-vision": 1, // $0.00025 / 1k characters -> $0.001 / 1k tokens
@@ -122,6 +128,15 @@ var ModelRatio = map[string]float64{
 	"mistral-medium-latest": 2.7 / 1000 * USD,
 	"mistral-large-latest":  8.0 / 1000 * USD,
 	"mistral-embed":         0.1 / 1000 * USD,
+	// https://wow.groq.com/
+	"llama2-70b-4096":    0.7 / 1000 * USD,
+	"llama2-7b-2048":     0.1 / 1000 * USD,
+	"mixtral-8x7b-32768": 0.27 / 1000 * USD,
+	"gemma-7b-it":        0.1 / 1000 * USD,
+	// https://platform.lingyiwanwu.com/docs#-计费单元
+	"yi-34b-chat-0205": 2.5 / 1000000 * RMB,
+	"yi-34b-chat-200k": 12.0 / 1000000 * RMB,
+	"yi-vl-plus":       6.0 / 1000000 * RMB,
 }
 
 var CompletionRatio = map[string]float64{}
@@ -138,6 +153,26 @@ func init() {
 	for k, v := range CompletionRatio {
 		DefaultCompletionRatio[k] = v
 	}
+}
+
+func AddNewMissingRatio(oldRatio string) string {
+	newRatio := make(map[string]float64)
+	err := json.Unmarshal([]byte(oldRatio), &newRatio)
+	if err != nil {
+		logger.SysError("error unmarshalling old ratio: " + err.Error())
+		return oldRatio
+	}
+	for k, v := range DefaultModelRatio {
+		if _, ok := newRatio[k]; !ok {
+			newRatio[k] = v
+		}
+	}
+	jsonBytes, err := json.Marshal(newRatio)
+	if err != nil {
+		logger.SysError("error marshalling new ratio: " + err.Error())
+		return oldRatio
+	}
+	return string(jsonBytes)
 }
 
 func ModelRatio2JSONString() string {
@@ -206,7 +241,7 @@ func GetCompletionRatio(name string) float64 {
 				return 2
 			}
 		}
-		return 1.333333
+		return 4.0 / 3.0
 	}
 	if strings.HasPrefix(name, "gpt-4") {
 		if strings.HasSuffix(name, "preview") {
@@ -214,14 +249,18 @@ func GetCompletionRatio(name string) float64 {
 		}
 		return 2
 	}
-	if strings.HasPrefix(name, "claude-instant-1") {
-		return 3.38
+	if strings.HasPrefix(name, "claude-3") {
+		return 5
 	}
-	if strings.HasPrefix(name, "claude-2") {
-		return 2.965517
+	if strings.HasPrefix(name, "claude-") {
+		return 3
 	}
 	if strings.HasPrefix(name, "mistral-") {
 		return 3
+	}
+	switch name {
+	case "llama2-70b-4096":
+		return 0.8 / 0.7
 	}
 	return 1
 }
