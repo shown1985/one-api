@@ -5,8 +5,9 @@ permissions:
 on:
   push:
     tags:
-      - '*'
+      - 'v*.*.*'
       - '!*-alpha*'
+      - '!*-preview*'
   workflow_dispatch:
     inputs:
       name:

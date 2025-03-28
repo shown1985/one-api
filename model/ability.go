@@ -1,9 +1,14 @@
 package model
 
 import (
-	"github.com/songquanpeng/one-api/common"
-	"gorm.io/gorm"
+	"context"
+	"sort"
 	"strings"
+
+	"gorm.io/gorm"
+
+	"github.com/songquanpeng/one-api/common"
+	"github.com/songquanpeng/one-api/common/utils"
 )
 
 type Ability struct {
@@ -47,6 +52,7 @@ func GetRandomSatisfiedChannel(group string, model string, ignoreFirstPriority b
 
 func (channel *Channel) AddAbilities() error {
 	models_ := strings.Split(channel.Models, ",")
+	models_ = utils.DeDuplication(models_)
 	groups_ := strings.Split(channel.Group, ",")
 	abilities := make([]Ability, 0, len(models_))
 	for _, model := range models_ {
@@ -55,7 +61,7 @@ func (channel *Channel) AddAbilities() error {
 				Group:     group,
 				Model:     model,
 				ChannelId: channel.Id,
-				Enabled:   channel.Status == common.ChannelStatusEnabled,
+				Enabled:   channel.Status == ChannelStatusEnabled,
 				Priority:  channel.Priority,
 			}
 			abilities = append(abilities, ability)
@@ -87,4 +93,20 @@ func (channel *Channel) UpdateAbilities() error {
 
 func UpdateAbilityStatus(channelId int, status bool) error {
 	return DB.Model(&Ability{}).Where("channel_id = ?", channelId).Select("enabled").Update("enabled", status).Error
+}
+
+func GetGroupModels(ctx context.Context, group string) ([]string, error) {
+	groupCol := "`group`"
+	trueVal := "1"
+	if common.UsingPostgreSQL {
+		groupCol = `"group"`
+		trueVal = "true"
+	}
+	var models []string
+	err := DB.Model(&Ability{}).Distinct("model").Where(groupCol+" = ? and enabled = "+trueVal, group).Pluck("model", &models).Error
+	if err != nil {
+		return nil, err
+	}
+	sort.Strings(models)
+	return models, err
 }

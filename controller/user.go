@@ -3,16 +3,19 @@ package controller
 import (
 	"encoding/json"
 	"fmt"
-	"github.com/songquanpeng/one-api/common"
-	"github.com/songquanpeng/one-api/common/config"
-	"github.com/songquanpeng/one-api/common/helper"
-	"github.com/songquanpeng/one-api/model"
 	"net/http"
 	"strconv"
 	"time"
 
 	"github.com/gin-contrib/sessions"
 	"github.com/gin-gonic/gin"
+
+	"github.com/songquanpeng/one-api/common"
+	"github.com/songquanpeng/one-api/common/config"
+	"github.com/songquanpeng/one-api/common/ctxkey"
+	"github.com/songquanpeng/one-api/common/i18n"
+	"github.com/songquanpeng/one-api/common/random"
+	"github.com/songquanpeng/one-api/model"
 )
 
 type LoginRequest struct {
@@ -32,7 +35,7 @@ func Login(c *gin.Context) {
 	err := json.NewDecoder(c.Request.Body).Decode(&loginRequest)
 	if err != nil {
 		c.JSON(http.StatusOK, gin.H{
-			"message": "无效的参数",
+			"message": i18n.Translate(c, "invalid_parameter"),
 			"success": false,
 		})
 		return
@@ -41,7 +44,7 @@ func Login(c *gin.Context) {
 	password := loginRequest.Password
 	if username == "" || password == "" {
 		c.JSON(http.StatusOK, gin.H{
-			"message": "无效的参数",
+			"message": i18n.Translate(c, "invalid_parameter"),
 			"success": false,
 		})
 		return
@@ -58,11 +61,11 @@ func Login(c *gin.Context) {
 		})
 		return
 	}
-	setupLogin(&user, c)
+	SetupLogin(&user, c)
 }
 
 // setup session & cookies and then return user info
-func setupLogin(user *model.User, c *gin.Context) {
+func SetupLogin(user *model.User, c *gin.Context) {
 	session := sessions.Default(c)
 	session.Set("id", user.Id)
 	session.Set("username", user.Username)
@@ -108,6 +111,7 @@ func Logout(c *gin.Context) {
 }
 
 func Register(c *gin.Context) {
+	ctx := c.Request.Context()
 	if !config.RegisterEnabled {
 		c.JSON(http.StatusOK, gin.H{
 			"message": "管理员关闭了新用户注册",
@@ -127,14 +131,14 @@ func Register(c *gin.Context) {
 	if err != nil {
 		c.JSON(http.StatusOK, gin.H{
 			"success": false,
-			"message": "无效的参数",
+			"message": i18n.Translate(c, "invalid_parameter"),
 		})
 		return
 	}
 	if err := common.Validate.Struct(&user); err != nil {
 		c.JSON(http.StatusOK, gin.H{
 			"success": false,
-			"message": "输入不合法 " + err.Error(),
+			"message": i18n.Translate(c, "invalid_input"),
 		})
 		return
 	}
@@ -165,13 +169,14 @@ func Register(c *gin.Context) {
 	if config.EmailVerificationEnabled {
 		cleanUser.Email = user.Email
 	}
-	if err := cleanUser.Insert(inviterId); err != nil {
+	if err := cleanUser.Insert(ctx, inviterId); err != nil {
 		c.JSON(http.StatusOK, gin.H{
 			"success": false,
 			"message": err.Error(),
 		})
 		return
 	}
+
 	c.JSON(http.StatusOK, gin.H{
 		"success": true,
 		"message": "",
@@ -180,27 +185,27 @@ func Register(c *gin.Context) {
 }
 
 func GetAllUsers(c *gin.Context) {
-    p, _ := strconv.Atoi(c.Query("p"))
-    if p < 0 {
-        p = 0
-    }
-    
-    order := c.DefaultQuery("order", "")
-    users, err := model.GetAllUsers(p*config.ItemsPerPage, config.ItemsPerPage, order)
-	
-    if err != nil {
-        c.JSON(http.StatusOK, gin.H{
-            "success": false,
-            "message": err.Error(),
-        })
-        return
-    }
-    
-    c.JSON(http.StatusOK, gin.H{
-        "success": true,
-        "message": "",
-        "data":    users,
-    })
+	p, _ := strconv.Atoi(c.Query("p"))
+	if p < 0 {
+		p = 0
+	}
+
+	order := c.DefaultQuery("order", "")
+	users, err := model.GetAllUsers(p*config.ItemsPerPage, config.ItemsPerPage, order)
+
+	if err != nil {
+		c.JSON(http.StatusOK, gin.H{
+			"success": false,
+			"message": err.Error(),
+		})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"success": true,
+		"message": "",
+		"data":    users,
+	})
 }
 
 func SearchUsers(c *gin.Context) {
@@ -238,8 +243,8 @@ func GetUser(c *gin.Context) {
 		})
 		return
 	}
-	myRole := c.GetInt("role")
-	if myRole <= user.Role && myRole != common.RoleRootUser {
+	myRole := c.GetInt(ctxkey.Role)
+	if myRole <= user.Role && myRole != model.RoleRootUser {
 		c.JSON(http.StatusOK, gin.H{
 			"success": false,
 			"message": "无权获取同级或更高等级用户的信息",
@@ -255,7 +260,7 @@ func GetUser(c *gin.Context) {
 }
 
 func GetUserDashboard(c *gin.Context) {
-	id := c.GetInt("id")
+	id := c.GetInt(ctxkey.Id)
 	now := time.Now()
 	startOfDay := now.Truncate(24*time.Hour).AddDate(0, 0, -6).Unix()
 	endOfDay := now.Truncate(24 * time.Hour).Add(24*time.Hour - time.Second).Unix()
@@ -278,7 +283,7 @@ func GetUserDashboard(c *gin.Context) {
 }
 
 func GenerateAccessToken(c *gin.Context) {
-	id := c.GetInt("id")
+	id := c.GetInt(ctxkey.Id)
 	user, err := model.GetUserById(id, true)
 	if err != nil {
 		c.JSON(http.StatusOK, gin.H{
@@ -287,7 +292,7 @@ func GenerateAccessToken(c *gin.Context) {
 		})
 		return
 	}
-	user.AccessToken = helper.GetUUID()
+	user.AccessToken = random.GetUUID()
 
 	if model.DB.Where("access_token = ?", user.AccessToken).First(user).RowsAffected != 0 {
 		c.JSON(http.StatusOK, gin.H{
@@ -314,7 +319,7 @@ func GenerateAccessToken(c *gin.Context) {
 }
 
 func GetAffCode(c *gin.Context) {
-	id := c.GetInt("id")
+	id := c.GetInt(ctxkey.Id)
 	user, err := model.GetUserById(id, true)
 	if err != nil {
 		c.JSON(http.StatusOK, gin.H{
@@ -324,7 +329,7 @@ func GetAffCode(c *gin.Context) {
 		return
 	}
 	if user.AffCode == "" {
-		user.AffCode = helper.GetRandomString(4)
+		user.AffCode = random.GetRandomString(4)
 		if err := user.Update(false); err != nil {
 			c.JSON(http.StatusOK, gin.H{
 				"success": false,
@@ -342,7 +347,7 @@ func GetAffCode(c *gin.Context) {
 }
 
 func GetSelf(c *gin.Context) {
-	id := c.GetInt("id")
+	id := c.GetInt(ctxkey.Id)
 	user, err := model.GetUserById(id, false)
 	if err != nil {
 		c.JSON(http.StatusOK, gin.H{
@@ -360,12 +365,13 @@ func GetSelf(c *gin.Context) {
 }
 
 func UpdateUser(c *gin.Context) {
+	ctx := c.Request.Context()
 	var updatedUser model.User
 	err := json.NewDecoder(c.Request.Body).Decode(&updatedUser)
 	if err != nil || updatedUser.Id == 0 {
 		c.JSON(http.StatusOK, gin.H{
 			"success": false,
-			"message": "无效的参数",
+			"message": i18n.Translate(c, "invalid_parameter"),
 		})
 		return
 	}
@@ -375,7 +381,7 @@ func UpdateUser(c *gin.Context) {
 	if err := common.Validate.Struct(&updatedUser); err != nil {
 		c.JSON(http.StatusOK, gin.H{
 			"success": false,
-			"message": "输入不合法 " + err.Error(),
+			"message": i18n.Translate(c, "invalid_input"),
 		})
 		return
 	}
@@ -387,15 +393,15 @@ func UpdateUser(c *gin.Context) {
 		})
 		return
 	}
-	myRole := c.GetInt("role")
-	if myRole <= originUser.Role && myRole != common.RoleRootUser {
+	myRole := c.GetInt(ctxkey.Role)
+	if myRole <= originUser.Role && myRole != model.RoleRootUser {
 		c.JSON(http.StatusOK, gin.H{
 			"success": false,
 			"message": "无权更新同权限等级或更高权限等级的用户信息",
 		})
 		return
 	}
-	if myRole <= updatedUser.Role && myRole != common.RoleRootUser {
+	if myRole <= updatedUser.Role && myRole != model.RoleRootUser {
 		c.JSON(http.StatusOK, gin.H{
 			"success": false,
 			"message": "无权将其他用户权限等级提升到大于等于自己的权限等级",
@@ -414,7 +420,7 @@ func UpdateUser(c *gin.Context) {
 		return
 	}
 	if originUser.Quota != updatedUser.Quota {
-		model.RecordLog(originUser.Id, model.LogTypeManage, fmt.Sprintf("管理员将用户额度从 %s修改为 %s", common.LogQuota(originUser.Quota), common.LogQuota(updatedUser.Quota)))
+		model.RecordLog(ctx, originUser.Id, model.LogTypeManage, fmt.Sprintf("管理员将用户额度从 %s修改为 %s", common.LogQuota(originUser.Quota), common.LogQuota(updatedUser.Quota)))
 	}
 	c.JSON(http.StatusOK, gin.H{
 		"success": true,
@@ -429,7 +435,7 @@ func UpdateSelf(c *gin.Context) {
 	if err != nil {
 		c.JSON(http.StatusOK, gin.H{
 			"success": false,
-			"message": "无效的参数",
+			"message": i18n.Translate(c, "invalid_parameter"),
 		})
 		return
 	}
@@ -445,7 +451,7 @@ func UpdateSelf(c *gin.Context) {
 	}
 
 	cleanUser := model.User{
-		Id:          c.GetInt("id"),
+		Id:          c.GetInt(ctxkey.Id),
 		Username:    user.Username,
 		Password:    user.Password,
 		DisplayName: user.DisplayName,
@@ -509,7 +515,7 @@ func DeleteSelf(c *gin.Context) {
 	id := c.GetInt("id")
 	user, _ := model.GetUserById(id, false)
 
-	if user.Role == common.RoleRootUser {
+	if user.Role == model.RoleRootUser {
 		c.JSON(http.StatusOK, gin.H{
 			"success": false,
 			"message": "不能删除超级管理员账户",
@@ -533,19 +539,20 @@ func DeleteSelf(c *gin.Context) {
 }
 
 func CreateUser(c *gin.Context) {
+	ctx := c.Request.Context()
 	var user model.User
 	err := json.NewDecoder(c.Request.Body).Decode(&user)
 	if err != nil || user.Username == "" || user.Password == "" {
 		c.JSON(http.StatusOK, gin.H{
 			"success": false,
-			"message": "无效的参数",
+			"message": i18n.Translate(c, "invalid_parameter"),
 		})
 		return
 	}
 	if err := common.Validate.Struct(&user); err != nil {
 		c.JSON(http.StatusOK, gin.H{
 			"success": false,
-			"message": "输入不合法 " + err.Error(),
+			"message": i18n.Translate(c, "invalid_input"),
 		})
 		return
 	}
@@ -566,7 +573,7 @@ func CreateUser(c *gin.Context) {
 		Password:    user.Password,
 		DisplayName: user.DisplayName,
 	}
-	if err := cleanUser.Insert(0); err != nil {
+	if err := cleanUser.Insert(ctx, 0); err != nil {
 		c.JSON(http.StatusOK, gin.H{
 			"success": false,
 			"message": err.Error(),
@@ -594,7 +601,7 @@ func ManageUser(c *gin.Context) {
 	if err != nil {
 		c.JSON(http.StatusOK, gin.H{
 			"success": false,
-			"message": "无效的参数",
+			"message": i18n.Translate(c, "invalid_parameter"),
 		})
 		return
 	}
@@ -611,7 +618,7 @@ func ManageUser(c *gin.Context) {
 		return
 	}
 	myRole := c.GetInt("role")
-	if myRole <= user.Role && myRole != common.RoleRootUser {
+	if myRole <= user.Role && myRole != model.RoleRootUser {
 		c.JSON(http.StatusOK, gin.H{
 			"success": false,
 			"message": "无权更新同权限等级或更高权限等级的用户信息",
@@ -620,8 +627,8 @@ func ManageUser(c *gin.Context) {
 	}
 	switch req.Action {
 	case "disable":
-		user.Status = common.UserStatusDisabled
-		if user.Role == common.RoleRootUser {
+		user.Status = model.UserStatusDisabled
+		if user.Role == model.RoleRootUser {
 			c.JSON(http.StatusOK, gin.H{
 				"success": false,
 				"message": "无法禁用超级管理员用户",
@@ -629,9 +636,9 @@ func ManageUser(c *gin.Context) {
 			return
 		}
 	case "enable":
-		user.Status = common.UserStatusEnabled
+		user.Status = model.UserStatusEnabled
 	case "delete":
-		if user.Role == common.RoleRootUser {
+		if user.Role == model.RoleRootUser {
 			c.JSON(http.StatusOK, gin.H{
 				"success": false,
 				"message": "无法删除超级管理员用户",
@@ -646,37 +653,37 @@ func ManageUser(c *gin.Context) {
 			return
 		}
 	case "promote":
-		if myRole != common.RoleRootUser {
+		if myRole != model.RoleRootUser {
 			c.JSON(http.StatusOK, gin.H{
 				"success": false,
 				"message": "普通管理员用户无法提升其他用户为管理员",
 			})
 			return
 		}
-		if user.Role >= common.RoleAdminUser {
+		if user.Role >= model.RoleAdminUser {
 			c.JSON(http.StatusOK, gin.H{
 				"success": false,
 				"message": "该用户已经是管理员",
 			})
 			return
 		}
-		user.Role = common.RoleAdminUser
+		user.Role = model.RoleAdminUser
 	case "demote":
-		if user.Role == common.RoleRootUser {
+		if user.Role == model.RoleRootUser {
 			c.JSON(http.StatusOK, gin.H{
 				"success": false,
 				"message": "无法降级超级管理员用户",
 			})
 			return
 		}
-		if user.Role == common.RoleCommonUser {
+		if user.Role == model.RoleCommonUser {
 			c.JSON(http.StatusOK, gin.H{
 				"success": false,
 				"message": "该用户已经是普通用户",
 			})
 			return
 		}
-		user.Role = common.RoleCommonUser
+		user.Role = model.RoleCommonUser
 	}
 
 	if err := user.Update(false); err != nil {
@@ -730,7 +737,7 @@ func EmailBind(c *gin.Context) {
 		})
 		return
 	}
-	if user.Role == common.RoleRootUser {
+	if user.Role == model.RoleRootUser {
 		config.RootUserEmail = email
 	}
 	c.JSON(http.StatusOK, gin.H{
@@ -745,6 +752,7 @@ type topUpRequest struct {
 }
 
 func TopUp(c *gin.Context) {
+	ctx := c.Request.Context()
 	req := topUpRequest{}
 	err := c.ShouldBindJSON(&req)
 	if err != nil {
@@ -755,7 +763,7 @@ func TopUp(c *gin.Context) {
 		return
 	}
 	id := c.GetInt("id")
-	quota, err := model.Redeem(req.Key, id)
+	quota, err := model.Redeem(ctx, req.Key, id)
 	if err != nil {
 		c.JSON(http.StatusOK, gin.H{
 			"success": false,
@@ -767,6 +775,42 @@ func TopUp(c *gin.Context) {
 		"success": true,
 		"message": "",
 		"data":    quota,
+	})
+	return
+}
+
+type adminTopUpRequest struct {
+	UserId int    `json:"user_id"`
+	Quota  int    `json:"quota"`
+	Remark string `json:"remark"`
+}
+
+func AdminTopUp(c *gin.Context) {
+	ctx := c.Request.Context()
+	req := adminTopUpRequest{}
+	err := c.ShouldBindJSON(&req)
+	if err != nil {
+		c.JSON(http.StatusOK, gin.H{
+			"success": false,
+			"message": err.Error(),
+		})
+		return
+	}
+	err = model.IncreaseUserQuota(req.UserId, int64(req.Quota))
+	if err != nil {
+		c.JSON(http.StatusOK, gin.H{
+			"success": false,
+			"message": err.Error(),
+		})
+		return
+	}
+	if req.Remark == "" {
+		req.Remark = fmt.Sprintf("通过 API 充值 %s", common.LogQuota(int64(req.Quota)))
+	}
+	model.RecordTopupLog(ctx, req.UserId, req.Remark, req.Quota)
+	c.JSON(http.StatusOK, gin.H{
+		"success": true,
+		"message": "",
 	})
 	return
 }
